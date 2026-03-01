@@ -2,6 +2,13 @@
 
 Predict Formula 1 race outcomes using Machine Learning, historical data, and live FastF1 practice/qualifying sessions! 
 
+<div align="center">
+  <img src="images/screenshot1.png" width="800" alt="Dashboard Screenshot 1" />
+  <br/>
+  <img src="images/screenshot2.png" width="400" alt="Dashboard Screenshot 2" />
+  <img src="images/screenshot3.png" width="400" alt="Dashboard Screenshot 3" />
+</div>
+
 **Credits & Origin:**
 - 🧠 **Original Core Engine Structure & ML Codebase by:** [@mar_antaya](https://www.instagram.com/mar_antaya) (Check them out on Instagram and TikTok for predictions before every F1 race!)
 - ⚡ **2026 Season Automation & Streamlit App Features by:** [@wild__zee](https://www.instagram.com/wild__zee) on Instagram.
