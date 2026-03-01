@@ -1,0 +1,9 @@
+fastf1
+pandas
+numpy
+scikit-learn
+streamlit
+plotly
+python-dotenv
+requests
+xgboost

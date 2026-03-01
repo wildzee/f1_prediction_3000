@@ -1,0 +1,46 @@
+{
+    "barcelona": {
+        "dates": "January 26-30",
+        "fastest_laps": {
+            "HAM": 76.348,
+            "NOR": 76.594,
+            "LEC": 76.653,
+            "RUS": 76.445,
+            "ANT": 77.081,
+            "PIA": 77.446,
+            "VER": 77.586,
+            "GAS": 77.707,
+            "HAD": 78.159,
+            "OCO": 78.393
+        },
+        "laps_by_team": {
+            "Mercedes": 502,
+            "Ferrari": 440,
+            "Haas": 386,
+            "Alpine": 349,
+            "Racing Bulls": 319,
+            "Red Bull": 303,
+            "McLaren": 291,
+            "Audi": 240,
+            "Cadillac": 164,
+            "Aston Martin": 65,
+            "Williams": 0
+        }
+    },
+    "bahrain": {
+        "dates": "February 11-20",
+        "fastest_laps": {
+            "LEC": 91.992,
+            "ANT": 92.803,
+            "PIA": 92.861,
+            "NOR": 92.871,
+            "VER": 93.109,
+            "RUS": 93.197,
+            "GAS": 93.421,
+            "BEA": 93.487,
+            "BOR": 93.755,
+            "LIN": 94.149,
+            "SAI": 94.342
+        }
+    }
+}
