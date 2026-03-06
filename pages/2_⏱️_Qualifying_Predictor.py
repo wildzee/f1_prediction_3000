@@ -241,6 +241,20 @@ if run_btn and has_practice:
 
         df["EstimatedQuali (s)"] = df.apply(blend_row, axis=1)
         
+        # ── Team floor constraint ──
+        # A driver's estimate can't be more than 0.3s faster than their team's
+        # circuit estimate. This prevents a single lucky qualifying session from
+        # overriding the car's realistic performance level (e.g. Stroll P2).
+        if team_est_available:
+            df["EstimatedQuali (s)"] = df.apply(
+                lambda row: max(
+                    row["EstimatedQuali (s)"],
+                    row["TeamCircuitEst (s)"] - 0.3
+                ) if pd.notna(row["EstimatedQuali (s)"]) and pd.notna(row["TeamCircuitEst (s)"])
+                else row["EstimatedQuali (s)"],
+                axis=1
+            )
+        
         # ── Weather adjustment (wet race) ──
         rain_prob = weather.get("pop", 0.0)
         if rain_prob >= 0.75:
