@@ -1,61 +1,96 @@
-import os
-import requests
-from dotenv import load_dotenv
-from datetime import datetime, timedelta
+import openmeteo_requests
+import requests_cache
+import pandas as pd
+from retry_requests import retry
+from datetime import datetime
 
-load_dotenv()
-API_KEY = os.getenv("OPENWEATHER_API_KEY")
+# Setup Open-Meteo API client with cache and retry
+cache_session = requests_cache.CachedSession('.weather_cache', expire_after=3600)
+retry_session = retry(cache_session, retries=3, backoff_factor=0.2)
+openmeteo = openmeteo_requests.Client(session=retry_session)
+
 
 def get_weather_forecast(lat, lon, race_date_str):
     """
-    Fetches the weather forecast for a given latitude, longitude, and date.
-    Returns a dictionary with rain probability and temperature.
+    Fetches the weather forecast for a given latitude, longitude, and race date.
+    Uses Open-Meteo (free, no API key, 16-day forecast range).
+    Returns a dictionary with rain probability, temperature, and description.
     """
     default_weather = {"pop": 0.0, "temp": 22.0, "description": "Unknown - using historical average"}
-    
-    if not API_KEY or API_KEY == "your_openweather_api_key_here":
-        # Missing API Key, return defaults
-        return default_weather
-        
+
     try:
-        url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
-        response = requests.get(url, timeout=5)
-        
-        if response.status_code != 200:
-            return default_weather
-            
-        weather_data = response.json()
-        
         race_date = datetime.strptime(race_date_str, "%Y-%m-%d")
-        
-        # OpenWeather's free forecast API only goes up to 5 days
         today = datetime.now()
         days_away = (race_date - today).days
-        
-        if days_away > 5 or days_away < 0:
-            # Race is too far out or in the past for the 5-day forecast
+
+        # Open-Meteo supports up to 16 days ahead
+        if days_away > 16 or days_away < 0:
             return default_weather
-            
-        # Target Sunday afternoon ~14:00 local time
-        target_time_str = f"{race_date_str} 15:00:00" 
-        
-        # Try to find exact match
-        forecast_data = next((f for f in weather_data["list"] if f["dt_txt"] == target_time_str), None)
-        
-        # If not exact match, get the closest one on that day
-        if not forecast_data:
-            day_forecasts = [f for f in weather_data["list"] if f["dt_txt"].startswith(race_date_str)]
-            if day_forecasts:
-                # Just take the mid-day one
-                forecast_data = day_forecasts[len(day_forecasts)//2]
-                
-        if forecast_data:
-            pop = forecast_data.get("pop", 0)
-            temp = forecast_data["main"]["temp"]
-            desc = forecast_data["weather"][0]["description"] if forecast_data.get("weather") else ""
-            return {"pop": pop, "temp": temp, "description": desc}
-            
+
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": [
+                "precipitation_probability_max",
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "weathercode"
+            ],
+            "timezone": "auto",
+            "forecast_days": min(days_away + 1, 16),
+        }
+
+        responses = openmeteo.weather_api(url, params=params)
+        response = responses[0]
+
+        daily = response.Daily()
+
+        # Build a DataFrame of daily forecasts
+        dates = pd.date_range(
+            start=pd.to_datetime(daily.Time(), unit="s", utc=True),
+            end=pd.to_datetime(daily.TimeEnd(), unit="s", utc=True),
+            freq=pd.Timedelta(seconds=daily.Interval()),
+            inclusive="left"
+        )
+
+        daily_df = pd.DataFrame({
+            "date": dates.date,
+            "pop": daily.Variables(0).ValuesAsNumpy() / 100.0,   # convert % → 0-1
+            "temp_max": daily.Variables(1).ValuesAsNumpy(),
+            "temp_min": daily.Variables(2).ValuesAsNumpy(),
+            "weathercode": daily.Variables(3).ValuesAsNumpy(),
+        })
+
+        # Find the row matching race date
+        target_date = race_date.date()
+        row = daily_df[daily_df["date"] == target_date]
+
+        if row.empty:
+            return default_weather
+
+        row = row.iloc[0]
+        temp = round((row["temp_max"] + row["temp_min"]) / 2, 1)
+        pop = float(row["pop"])
+        description = _wmo_to_description(int(row["weathercode"]))
+
+        return {"pop": pop, "temp": temp, "description": description}
+
     except Exception as e:
-        print(f"Weather API Error: {e}")
-        
-    return default_weather
+        print(f"Open-Meteo weather error: {e}")
+        return default_weather
+
+
+def _wmo_to_description(code):
+    """Convert WMO weather interpretation code to a readable string."""
+    wmo_map = {
+        0: "Clear sky",
+        1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+        45: "Foggy", 48: "Icy fog",
+        51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+        61: "Slight rain", 63: "Rain", 65: "Heavy rain",
+        71: "Slight snow", 73: "Snow", 75: "Heavy snow",
+        80: "Slight showers", 81: "Showers", 82: "Heavy showers",
+        95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Heavy thunderstorm with hail",
+    }
+    return wmo_map.get(code, f"Weather code {code}")
