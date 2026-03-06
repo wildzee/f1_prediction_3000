@@ -112,9 +112,50 @@ with dc4:
 
 st.divider()
 
-if has_practice:
+# --- BLEND SETTINGS ---
+with st.expander("⚙️ Blend Settings — Customise Data Source Weights", expanded=False):
+    st.caption("Choose which data sources to include and how much to trust each one. Weights are automatically normalised to 100%.")
+    
+    bs_col1, bs_col2 = st.columns(2)
+    
+    with bs_col1:
+        use_fp = st.checkbox("🏎️ Practice Sessions (FP1/FP2/FP3)", value=has_practice, disabled=not has_practice)
+        w_fp = st.slider("FP Weight", 0, 100, 40, step=5, disabled=not use_fp, key="w_fp")
+        
+        use_hist = st.checkbox("📡 2025 Historical Qualifying", value=not hist_quali_check.empty, disabled=hist_quali_check.empty)
+        w_hist = st.slider("Historical Qualifying Weight", 0, 100, 30, step=5, disabled=not use_hist, key="w_hist")
+    
+    with bs_col2:
+        use_testing = st.checkbox("🧪 Pre-Season Testing", value=not preseason_check.empty, disabled=preseason_check.empty)
+        w_testing = st.slider("Testing Weight", 0, 100, 15, step=5, disabled=not use_testing, key="w_testing")
+        
+        use_team_est = st.checkbox("📐 Team-Circuit Estimate", value=True)
+        w_team_est = st.slider("Team-Circuit Estimate Weight", 0, 100, 15, step=5, disabled=not use_team_est, key="w_team_est")
+    
+    # Calculate total and show normalisation info
+    raw_total = (w_fp if use_fp else 0) + (w_hist if use_hist else 0) + \
+                (w_testing if use_testing else 0) + (w_team_est if use_team_est else 0)
+    
+    if raw_total == 0:
+        st.error("⚠️ At least one source must be selected!")
+        run_btn = False
+    else:
+        # Normalised weights
+        nw_fp      = (w_fp      / raw_total) if use_fp      else 0.0
+        nw_hist    = (w_hist    / raw_total) if use_hist    else 0.0
+        nw_testing = (w_testing / raw_total) if use_testing else 0.0
+        nw_team    = (w_team_est / raw_total) if use_team_est else 0.0
+        
+        pct_parts = []
+        if use_fp:       pct_parts.append(f"FP: **{nw_fp*100:.0f}%**")
+        if use_hist:     pct_parts.append(f"Hist Q: **{nw_hist*100:.0f}%**")
+        if use_testing:  pct_parts.append(f"Testing: **{nw_testing*100:.0f}%**")
+        if use_team_est: pct_parts.append(f"Team Est: **{nw_team*100:.0f}%**")
+        st.info("📊 Normalised blend: " + " · ".join(pct_parts))
+
+if has_practice and raw_total > 0:
     run_btn = st.button("🚀 Predict Qualifying Order", use_container_width=True)
-else:
+elif not has_practice:
     st.error(f"❌ **Cannot predict qualifying** — No practice session data available yet for the 2026 {historical_race_target} Grand Prix.")
     st.info("FastF1 will automatically fetch the data when FP1/FP2/FP3 sessions happen.")
     run_btn = False
@@ -180,9 +221,7 @@ if run_btn and has_practice:
             df["TeamCircuitEst (s)"] = np.nan
             team_est_available = False
 
-        # ── Blended Estimation ──
-        # Weights: FP=40%, HistQuali=30%, Testing=15%, TeamCircuitEst=15%
-        # If a source is missing, its weight is redistributed proportionally.
+        # ── Blended Estimation using user-defined weights ──
         def blend_row(row):
             fp_val   = row.get("FP_EstQuali (s)", np.nan)
             hist_val = row.get("HistQualiTime (s)", np.nan)
@@ -190,10 +229,10 @@ if run_btn and has_practice:
             team_val = row.get("TeamCircuitEst (s)", np.nan)
 
             sources, weights = [], []
-            if pd.notna(fp_val):   sources.append(fp_val);   weights.append(0.40)
-            if pd.notna(hist_val): sources.append(hist_val); weights.append(0.30)
-            if pd.notna(test_val): sources.append(test_val); weights.append(0.15)
-            if pd.notna(team_val): sources.append(team_val); weights.append(0.15)
+            if use_fp      and pd.notna(fp_val):   sources.append(fp_val);   weights.append(nw_fp)
+            if use_hist    and pd.notna(hist_val): sources.append(hist_val); weights.append(nw_hist)
+            if use_testing and pd.notna(test_val): sources.append(test_val); weights.append(nw_testing)
+            if use_team_est and pd.notna(team_val): sources.append(team_val); weights.append(nw_team)
 
             if not sources:
                 return np.nan
