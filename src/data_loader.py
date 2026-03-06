@@ -206,6 +206,51 @@ def get_live_practice_data(year, race):
             
     return pd.DataFrame(), None
 
+
+def get_all_practice_data(year, race):
+    """
+    Fetch practice data from ALL available sessions (FP1, FP2, FP3) and return
+    the best (fastest) lap per driver across all sessions.
+    Returns: (combined DataFrame with DriverCode + PracticeTime (s), list of loaded sessions)
+    """
+    all_laps = []
+    loaded_sessions = []
+
+    for s_type in ["FP1", "FP2", "FP3"]:
+        try:
+            session = fastf1.get_session(year, race, s_type)
+            session.load()
+            laps = session.laps[["Driver", "LapTime"]].copy()
+            laps.dropna(inplace=True)
+
+            if laps.empty:
+                continue
+
+            laps["PracticeTime (s)"] = laps["LapTime"].dt.total_seconds()
+
+            # Filter: only flying laps (>60s, within 107% of session best)
+            session_best = laps["PracticeTime (s)"].min()
+            laps = laps[
+                (laps["PracticeTime (s)"] >= 60) &
+                (laps["PracticeTime (s)"] <= session_best * 1.07)
+            ]
+
+            if not laps.empty:
+                all_laps.append(laps[["Driver", "PracticeTime (s)"]])
+                loaded_sessions.append(s_type)
+
+        except Exception:
+            continue
+
+    if not all_laps:
+        return pd.DataFrame(), []
+
+    combined = pd.concat(all_laps, ignore_index=True)
+    # Best (minimum) lap per driver across all sessions
+    fastest = combined.groupby("Driver")["PracticeTime (s)"].min().reset_index()
+    fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
+    return fastest, loaded_sessions
+
 def get_live_qualifying_data(year, race):
     """
     Attempt to fetch real qualifying data from FastF1 automatically.

@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import time
 
 from src.constants import load_calendar, TEAM_COLORS, CLEAN_AIR_PACE
 from src.data_loader import (
     get_historical_qualifying_data, get_2026_preseason_data,
-    get_driver_grid_2026, save_session_results, get_live_practice_data
+    get_driver_grid_2026, save_session_results, get_all_practice_data
 )
 from src.weather import get_weather_forecast
 
@@ -59,21 +60,23 @@ with col2:
 st.divider()
 
 # --- DATA AVAILABILITY CHECK ---
-with st.spinner("Checking FastF1 for live 2026 session data..."):
-    practice_df, session_used = get_live_practice_data(2026, historical_race_target)
+with st.spinner("Checking FastF1 for live 2026 session data (FP1 + FP2 + FP3)..."):
+    practice_df, sessions_loaded = get_all_practice_data(2026, historical_race_target)
     hist_quali_check = get_historical_qualifying_data(2025, historical_race_target)
+    preseason_check = get_2026_preseason_data()
 
 has_practice = not practice_df.empty
+sessions_label = " + ".join(sessions_loaded) if sessions_loaded else "None"
 
 # --- DATA STATUS CARD (always visible before prediction) ---
 st.subheader("📡 Data Inputs")
-dc1, dc2, dc3 = st.columns(3)
+dc1, dc2, dc3, dc4 = st.columns(4)
 
 with dc1:
-    st.markdown("**🏎️ Live Practice Session**")
+    st.markdown("**🏎️ Live Practice Sessions**")
     if has_practice:
         laps_count = len(practice_df)
-        st.success(f"✅ **{session_used}** ({laps_count} drivers loaded)")
+        st.success(f"✅ **{sessions_label}** ({laps_count} drivers, best lap across all sessions)")
     else:
         st.error("❌ No practice data yet")
         st.caption("Available after FP1/FP2/FP3")
@@ -81,12 +84,19 @@ with dc1:
 with dc2:
     st.markdown("**📡 2025 Historical Qualifying**")
     if not hist_quali_check.empty:
-        st.success(f"✅ {historical_race_target} 2025 Q data ({len(hist_quali_check)} drivers)")
+        st.success(f"✅ {historical_race_target} 2025 Q ({len(hist_quali_check)} drivers)")
     else:
         st.warning(f"⚠️ No 2025 {historical_race_target} data")
-        st.caption("Practice-only estimation will be used")
+        st.caption("Practice-only estimation used")
 
 with dc3:
+    st.markdown("**🧪 Pre-Season Testing**")
+    if not preseason_check.empty:
+        st.success(f"✅ 2026 BCN + BHR ({len(preseason_check)} drivers)")
+    else:
+        st.warning("⚠️ No testing data loaded")
+
+with dc4:
     st.markdown("**🌤️ Weather for Race Day**")
     rain_pct = weather.get('pop', 0) * 100
     temp = weather.get('temp', 22)
@@ -111,23 +121,11 @@ else:
 
 # --- QUALIFYING PREDICTION ---
 if run_btn and has_practice:
-    with st.spinner("Building qualifying prediction from practice and historical data..."):
+    with st.spinner("Building qualifying prediction from all available data sources..."):
         start_time = time.time()
         
         grid = get_driver_grid_2026()
-        
-        # Merge practice data
-        df = grid.merge(practice_df[["DriverCode", "PracticeTime (s)"]], on="DriverCode", how="left")
-        
-        # Load historical qualifying data (2025)
-        hist_quali = get_historical_qualifying_data(2025, historical_race_target)
-        if not hist_quali.empty:
-            hist_quali = hist_quali.rename(columns={"Driver": "DriverCode", "QualifyingTime (s)": "HistQualiTime (s)"})
-            df = df.merge(hist_quali[["DriverCode", "HistQualiTime (s)"]], on="DriverCode", how="left")
-            circuit_median = hist_quali["HistQualiTime (s)"].median()
-            hist_available = True
-        else:
-            hist_available = False
+        preseason = get_2026_preseason_data()
         
         # Team performance scores
         team_points = {
@@ -137,34 +135,67 @@ if run_btn and has_practice:
         }
         max_pts = max(team_points.values())
         team_scores = {t: p / max_pts for t, p in team_points.items()}
+        
+        df = grid.copy()
         df["TeamScore"] = df["Team"].map(team_scores)
         
-        # --- FEATURE ENGINEERING FOR QUALIFYING ---
-        # 1. Base estimation: typically 1-2s faster than practice
-        df["EstimatedQuali (s)"] = df["PracticeTime (s)"] - 1.5 - (df["TeamScore"] * 0.5)
+        # ── Source 1: Combined FP sessions (best lap across FP1+FP2+FP3) ──
+        df = df.merge(practice_df[["DriverCode", "PracticeTime (s)"]], on="DriverCode", how="left")
+        # Estimate qualifying pace: practice best − 1.5s − team bonus
+        df["FP_EstQuali (s)"] = df["PracticeTime (s)"] - 1.5 - (df["TeamScore"] * 0.5)
         
-        # 2. Incorporate historical data if available
-        if hist_available:
-            mask = df["HistQualiTime (s)"].notna() & df["PracticeTime (s)"].notna()
-            # If historical is very different from practice (weather, track changes), trust practice more
-            # Blend: 80% Live Practice Estimation, 20% Historical Performance
-            df.loc[mask, "EstimatedQuali (s)"] = (df.loc[mask, "EstimatedQuali (s)"] * 0.8) + (df.loc[mask, "HistQualiTime (s)"] * 0.2)
+        # ── Source 2: 2025 Historical Qualifying ──
+        hist_quali = get_historical_qualifying_data(2025, historical_race_target)
+        if not hist_quali.empty:
+            hist_quali = hist_quali.rename(columns={"Driver": "DriverCode", "QualifyingTime (s)": "HistQualiTime (s)"})
+            df = df.merge(hist_quali[["DriverCode", "HistQualiTime (s)"]], on="DriverCode", how="left")
+            hist_available = True
+        else:
+            df["HistQualiTime (s)"] = np.nan
+            hist_available = False
         
-        # Weather adjustment
+        # ── Source 3: Pre-Season Testing ──
+        if not preseason.empty:
+            df = df.merge(preseason[["DriverCode", "TestingPace (s)"]], on="DriverCode", how="left")
+            testing_available = True
+        else:
+            df["TestingPace (s)"] = np.nan
+            testing_available = False
+        
+        # ── Blended Estimation ──
+        # Dynamically adjust weights based on which sources are available
+        # Target blend: FP=55%, HistQuali=25%, Testing=20%
+        def blend_row(row):
+            fp_val   = row.get("FP_EstQuali (s)", np.nan)
+            hist_val = row.get("HistQualiTime (s)", np.nan)
+            test_val = row.get("TestingPace (s)", np.nan)
+            
+            sources, weights = [], []
+            if pd.notna(fp_val):   sources.append(fp_val);   weights.append(0.55)
+            if pd.notna(hist_val): sources.append(hist_val); weights.append(0.25)
+            if pd.notna(test_val): sources.append(test_val); weights.append(0.20)
+            
+            if not sources:
+                return np.nan
+            total_w = sum(weights)
+            return sum(s * w for s, w in zip(sources, weights)) / total_w
+        
+        df["EstimatedQuali (s)"] = df.apply(blend_row, axis=1)
+        
+        # ── Weather adjustment (wet race) ──
         rain_prob = weather.get("pop", 0.0)
         if rain_prob >= 0.75:
             from src.constants import WET_PERFORMANCE
             df["WetFactor"] = df["DriverCode"].map(WET_PERFORMANCE)
             df["EstimatedQuali (s)"] *= df["WetFactor"]
         
-        # Handle drivers with missing practice data
-        df_with_times = df[df["PracticeTime (s)"].notna()].copy()
-        df_without_times = df[df["PracticeTime (s)"].isna()].copy()
+        # ── Sort: drivers with data first, rest at the back ──
+        df_with_times = df[df["EstimatedQuali (s)"].notna()].copy()
+        df_without_times = df[df["EstimatedQuali (s)"].isna()].copy()
         
         df_with_times.sort_values("EstimatedQuali (s)", ascending=True, inplace=True)
         
         if not df_without_times.empty:
-            # Drivers without practice data get put at the back
             df_without_times["EstimatedQuali (s)"] = df_with_times["EstimatedQuali (s)"].max() + 1.0
         
         df = pd.concat([df_with_times, df_without_times], ignore_index=True)
@@ -172,36 +203,42 @@ if run_btn and has_practice:
         
         gen_time = time.time() - start_time
     
-    st.success(f"Qualifying predicted in {gen_time:.2f} seconds! (Blended {session_used} + Historical Data)")
+    st.success(f"Qualifying predicted in {gen_time:.2f} seconds!")
     
     # --- DATA SOURCES PANEL ---
     with st.expander("📋 Data Sources Used in This Prediction", expanded=True):
         src_col1, src_col2 = st.columns(2)
         
         with src_col1:
-            st.markdown("**🏎️ Live Practice Data**")
-            st.success(f"✅ {session_used} — {historical_race_target} GP 2026 (FastF1, filtered to flying laps)")
-            
-            st.markdown("**📡 Historical Qualifying Data**")
-            if hist_available:
-                st.success(f"✅ 2025 {historical_race_target} GP qualifying (FastF1) — blended at 20%")
+            st.markdown("**🏎️ Practice Sessions (55% weight)**")
+            if sessions_loaded:
+                st.success(f"✅ {sessions_label} — best lap per driver across all sessions")
             else:
-                st.warning(f"⚠️ No 2025 {historical_race_target} qualifying data found — using practice only")
+                st.error("❌ No practice data")
+            
+            st.markdown("**📡 2025 Historical Qualifying (25% weight)**")
+            if hist_available:
+                st.success(f"✅ 2025 {historical_race_target} GP qualifying (FastF1)")
+            else:
+                st.warning(f"⚠️ Not available — weight redistributed to other sources")
         
         with src_col2:
-            st.markdown("**🌤️ Weather**")
-            rain_pct = weather.get('pop', 0) * 100
-            temp = weather.get('temp', 22)
-            desc = weather.get('description', 'N/A').title()
-            if weather.get('description', '') == 'Unknown - using historical average':
-                st.info("📋 Default (no forecast available) — dry conditions assumed")
+            st.markdown("**🧪 Pre-Season Testing (20% weight)**")
+            if testing_available:
+                st.success("✅ 2026 Barcelona + Bahrain fastest laps")
             else:
-                condition_icon = "🌧️" if rain_pct >= 50 else "⛅" if rain_pct >= 20 else "☀️"
-                wet_note = " — **wet performance factors applied**" if rain_pct >= 75 else ""
-                st.success(f"{condition_icon} Live forecast: {desc}, {temp}°C, {rain_pct:.0f}% rain{wet_note}")
+                st.warning("⚠️ Not available — weight redistributed")
             
-            st.markdown("**⚙️ Estimation Method**")
-            st.info("Practice time − 1.5s − (team performance bonus) → blended with historical qualifying at 80/20")
+            st.markdown("**🌤️ Weather**")
+            rain_pct_d = weather.get('pop', 0) * 100
+            temp_d = weather.get('temp', 22)
+            desc_d = weather.get('description', 'Unknown - using historical average')
+            if desc_d == 'Unknown - using historical average':
+                st.info("📋 Default (no forecast) — dry conditions assumed")
+            else:
+                condition_icon = "🌧️" if rain_pct_d >= 50 else "⛅" if rain_pct_d >= 20 else "☀️"
+                wet_note = " — **wet factors applied**" if rain_pct_d >= 75 else ""
+                st.success(f"{condition_icon} {desc_d.title()}, {temp_d}°C, {rain_pct_d:.0f}% rain{wet_note}")
     
     st.divider()
     
