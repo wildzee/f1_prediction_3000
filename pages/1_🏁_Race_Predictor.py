@@ -12,6 +12,32 @@ from src.features import engineer_features
 from src.model import train_model, predict_race, get_feature_importances
 from src.weather import get_weather_forecast
 
+# ── Cached data loaders ───────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def cached_live_q(year, race):
+    return get_live_qualifying_data(year, race)
+
+@st.cache_data(show_spinner=False)
+def cached_live_p(year, race):
+    return get_live_practice_data(year, race)
+
+@st.cache_data(show_spinner=False)
+def cached_preseason():
+    return get_2026_preseason_data()
+
+@st.cache_data(show_spinner=False)
+def cached_weather(lat, lon, date):
+    return get_weather_forecast(lat, lon, date)
+
+@st.cache_data(show_spinner=False)
+def cached_hist_race(year, race, session_type="R"):
+    return get_historical_race_data(year, race, session_type)
+
+@st.cache_data(show_spinner=False)
+def cached_circuit_baseline(year, race):
+    return get_circuit_baseline(year, race)
+# ─────────────────────────────────────────────────────────────────────────────
+
 st.set_page_config(page_title="Race Predictor", page_icon="🏁", layout="wide")
 
 st.markdown("""
@@ -57,7 +83,7 @@ with col1:
 
 with col2:
     st.subheader("🌤️ Weather Forecast")
-    weather = get_weather_forecast(race_info['lat'], race_info['lon'], race_info['date'])
+    weather = cached_weather(race_info['lat'], race_info['lon'], race_info['date'])
     m1, m2, m3 = st.columns(3)
     m1.metric("Temperature", f"{weather['temp']}°C")
     m2.metric("Rain Probability", f"{weather['pop']*100:.0f}%")
@@ -68,10 +94,10 @@ st.divider()
 # --- DATA AVAILABILITY CHECK ---
 # Priority: 1. Live Qualifying  2. Live Practice  3. Testing  4. Nothing → block
 with st.spinner("Checking FastF1 for live session data..."):
-    live_q = get_live_qualifying_data(2026, historical_race_target)
+    live_q = cached_live_q(2026, historical_race_target)
     saved_q = load_session_results(race_info['round'], "Q")
-    live_p, p_session = get_live_practice_data(2026, historical_race_target)
-    preseason = get_2026_preseason_data()
+    live_p, p_session = cached_live_p(2026, historical_race_target)
+    preseason = cached_preseason()
 
 # Determine which source to use (strict hierarchy)
 quali_input = None

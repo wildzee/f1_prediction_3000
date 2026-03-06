@@ -11,6 +11,26 @@ from src.data_loader import (
 )
 from src.weather import get_weather_forecast
 
+# ── Cached data loaders ───────────────────────────────────────────────────────
+# All heavy FastF1 calls are cached so slider/checkbox interactions
+# don't re-trigger session loads and cause segfaults.
+@st.cache_data(show_spinner=False)
+def cached_all_practice(year, race):
+    return get_all_practice_data(year, race)
+
+@st.cache_data(show_spinner=False)
+def cached_hist_quali(year, race):
+    return get_historical_qualifying_data(year, race)
+
+@st.cache_data(show_spinner=False)
+def cached_preseason():
+    return get_2026_preseason_data()
+
+@st.cache_data(show_spinner=False)
+def cached_weather(lat, lon, date):
+    return get_weather_forecast(lat, lon, date)
+# ─────────────────────────────────────────────────────────────────────────────
+
 st.set_page_config(page_title="Qualifying Predictor", page_icon="⏱️", layout="wide")
 
 st.markdown("""
@@ -51,7 +71,7 @@ with col1:
 
 with col2:
     st.subheader("🌤️ Weather Forecast")
-    weather = get_weather_forecast(race_info['lat'], race_info['lon'], race_info['date'])
+    weather = cached_weather(race_info['lat'], race_info['lon'], race_info['date'])
     m1, m2, m3 = st.columns(3)
     m1.metric("Temperature", f"{weather['temp']}°C")
     m2.metric("Rain Probability", f"{weather['pop']*100:.0f}%")
@@ -61,9 +81,9 @@ st.divider()
 
 # --- DATA AVAILABILITY CHECK ---
 with st.spinner("Checking FastF1 for live 2026 session data (FP1 + FP2 + FP3)..."):
-    practice_df, sessions_loaded = get_all_practice_data(2026, historical_race_target)
-    hist_quali_check = get_historical_qualifying_data(2025, historical_race_target)
-    preseason_check = get_2026_preseason_data()
+    practice_df, sessions_loaded = cached_all_practice(2026, historical_race_target)
+    hist_quali_check = cached_hist_quali(2025, historical_race_target)
+    preseason_check = cached_preseason()
 
 has_practice = not practice_df.empty
 sessions_label = " + ".join(sessions_loaded) if sessions_loaded else "None"
@@ -377,7 +397,7 @@ if run_btn and has_practice:
     fig = px.bar(
         df, y="DriverCode", x="EstimatedQuali (s)",
         color="Team", color_discrete_map=TEAM_COLORS,
-        orientation='h', title=f"Predicted Qualifying Pace (from {session_used} + History)"
+        orientation='h', title=f"Predicted Qualifying Pace (from {sessions_label} + History)"
     )
     fig.update_layout(yaxis={'categoryorder': 'total descending'}, template="plotly_dark")
     fig.update_xaxes(range=[df["EstimatedQuali (s)"].min() - 0.5, df["EstimatedQuali (s)"].max() + 0.5])
