@@ -16,7 +16,7 @@ def get_weather_forecast(lat, lon, race_date_str):
     Uses Open-Meteo (free, no API key, 16-day forecast range).
     Returns a dictionary with rain probability, temperature, and description.
     """
-    default_weather = {"pop": 0.0, "temp": 22.0, "description": "Unknown - using historical average"}
+    default_weather = {"pop": 0.0, "temp": 22.0, "description": "Unknown - using historical average", "wind_speed": 10.0, "wind_gusts": 20.0}
 
     try:
         race_date = datetime.strptime(race_date_str, "%Y-%m-%d")
@@ -35,7 +35,9 @@ def get_weather_forecast(lat, lon, race_date_str):
                 "precipitation_probability_max",
                 "temperature_2m_max",
                 "temperature_2m_min",
-                "weathercode"
+                "weathercode",
+                "wind_speed_10m_max",
+                "wind_gusts_10m_max"
             ],
             "timezone": "auto",
             "forecast_days": min(days_away + 1, 16),
@@ -60,6 +62,8 @@ def get_weather_forecast(lat, lon, race_date_str):
             "temp_max": daily.Variables(1).ValuesAsNumpy(),
             "temp_min": daily.Variables(2).ValuesAsNumpy(),
             "weathercode": daily.Variables(3).ValuesAsNumpy(),
+            "wind_speed": daily.Variables(4).ValuesAsNumpy(),
+            "wind_gusts": daily.Variables(5).ValuesAsNumpy(),
         })
 
         # Find the row matching race date
@@ -74,7 +78,10 @@ def get_weather_forecast(lat, lon, race_date_str):
         pop = float(row["pop"])
         description = _wmo_to_description(int(row["weathercode"]))
 
-        return {"pop": pop, "temp": temp, "description": description}
+        wind_speed = round(float(row["wind_speed"]), 1)
+        wind_gusts = round(float(row["wind_gusts"]), 1)
+
+        return {"pop": pop, "temp": temp, "description": description, "wind_speed": wind_speed, "wind_gusts": wind_gusts}
 
     except Exception as e:
         print(f"Open-Meteo weather error: {e}")

@@ -39,3 +39,4 @@ ENV/
 
 # Jupyter
 .ipynb_checkpoints/
+.weather_cache.sqlite

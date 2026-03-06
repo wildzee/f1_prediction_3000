@@ -125,21 +125,37 @@ def save_session_results(race_round, session_type, driver_times):
 
 
 def get_2026_preseason_data():
-    """Load pre-season testing data and return best lap per driver."""
+    """Load pre-season testing data and return best lap per driver.
+    Times are normalised per venue (% gap from session best) so
+    Barcelona and Bahrain results are comparable."""
     testing_data = load_testing_data()
     
-    best_laps = {}
+    normalised = {}  # driver → list of normalised gaps
     
-    for driver, time in testing_data["barcelona"]["fastest_laps"].items():
-        best_laps[driver] = time
-        
-    for driver, time in testing_data["bahrain"]["fastest_laps"].items():
-        if driver in best_laps:
-            best_laps[driver] = min(best_laps[driver], time)
-        else:
-            best_laps[driver] = time
-            
-    df = pd.DataFrame(list(best_laps.items()), columns=["DriverCode", "TestingPace (s)"])
+    for venue in ["barcelona", "bahrain"]:
+        if venue not in testing_data:
+            continue
+        laps = testing_data[venue].get("fastest_laps", {})
+        if not laps:
+            continue
+        best = min(laps.values())
+        for driver, lap_time in laps.items():
+            gap_pct = (lap_time - best) / best * 100  # 0% = fastest
+            normalised.setdefault(driver, []).append(gap_pct)
+    
+    # Average normalised gap per driver, then convert back to a pace estimate
+    # using a reference lap time (mean of session bests)
+    bcn_best = min(testing_data.get("barcelona", {}).get("fastest_laps", {"_": 76.0}).values())
+    bhr_best = min(testing_data.get("bahrain", {}).get("fastest_laps", {"_": 92.0}).values())
+    ref_time = (bcn_best + bhr_best) / 2  # average reference
+    
+    rows = []
+    for driver, gaps in normalised.items():
+        avg_gap = sum(gaps) / len(gaps)
+        pace = ref_time * (1 + avg_gap / 100)
+        rows.append({"DriverCode": driver, "TestingPace (s)": round(pace, 3)})
+    
+    df = pd.DataFrame(rows)
     return df
 
 
@@ -211,8 +227,12 @@ def get_all_practice_data(year, race):
     """
     Fetch practice data from ALL available sessions (FP1, FP2, FP3) and return
     the best (fastest) lap per driver across all sessions.
+    Lap times are normalised to soft-tyre equivalent when compound data is available.
     Returns: (combined DataFrame with DriverCode + PracticeTime (s), list of loaded sessions)
     """
+    # Tyre compound adjustment (normalise to soft-equivalent)
+    COMPOUND_ADJ = {"SOFT": 0, "MEDIUM": -0.7, "HARD": -1.5, "INTERMEDIATE": 2.0, "WET": 5.0}
+
     all_laps = []
     loaded_sessions = []
 
@@ -220,13 +240,25 @@ def get_all_practice_data(year, race):
         try:
             session = fastf1.get_session(year, race, s_type)
             session.load()
-            laps = session.laps[["Driver", "LapTime"]].copy()
-            laps.dropna(inplace=True)
+
+            cols_needed = ["Driver", "LapTime"]
+            has_compound = "Compound" in session.laps.columns
+            if has_compound:
+                cols_needed.append("Compound")
+
+            laps = session.laps[cols_needed].copy()
+            laps.dropna(subset=["Driver", "LapTime"], inplace=True)
 
             if laps.empty:
                 continue
 
             laps["PracticeTime (s)"] = laps["LapTime"].dt.total_seconds()
+
+            # Tyre normalisation: adjust to soft-equivalent
+            if has_compound:
+                laps["Compound"] = laps["Compound"].str.upper()
+                laps["TyreAdj"] = laps["Compound"].map(COMPOUND_ADJ).fillna(0)
+                laps["PracticeTime (s)"] = laps["PracticeTime (s)"] + laps["TyreAdj"]
 
             # Filter: only flying laps (>60s, within 107% of session best)
             session_best = laps["PracticeTime (s)"].min()

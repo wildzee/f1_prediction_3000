@@ -14,31 +14,42 @@ except (ImportError, Exception):
 
 def train_model(X, y):
     """
-    Train a model matching the original prediction scripts.
+    Train a model for race prediction.
     
     Uses XGBoost with monotone constraints if available.
     Falls back to sklearn GradientBoostingRegressor otherwise.
     
-    Monotone constraints (XGBoost only):
+    Monotone constraints (XGBoost only, 10 features):
       col 0 QualifyingTime:       +1 (higher quali time → higher/slower race time)
-      col 1 RainProbability:       0 (no constraint)
-      col 2 Temperature:           0 (no constraint)
-      col 3 TeamPerformanceScore: -1 (higher team score → lower/faster race time)
-      col 4 CleanAirRacePace:     +1 (higher pace value = slower)
+      col 1 GridPosition:         +1 (higher grid → worse finish)
+      col 2 RainProbability:       0 (no constraint)
+      col 3 Temperature:           0 (no constraint)
+      col 4 WindSpeed:             0 (no constraint)
+      col 5 TeamPerformanceScore: -1 (higher team score → lower/faster race time)
+      col 6 CleanAirRacePace:     +1 (higher pace value = slower)
+      col 7 CircuitType:           0 (no constraint)
+      col 8 DriverExperience:     -1 (more experience → better finish)
+      col 9 DNFRate:              +1 (higher DNF rate → worse expected finish)
     """
     if _USE_XGBOOST:
         model = XGBRegressor(
-            n_estimators=300,
-            learning_rate=0.9,
-            max_depth=3,
+            n_estimators=500,
+            learning_rate=0.05,
+            max_depth=4,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_lambda=1.0,
+            min_child_weight=3,
             random_state=39,
-            monotone_constraints='(1, 0, 0, -1, 1)'
+            monotone_constraints='(1, 1, 0, 0, 0, -1, 1, 0, -1, 1)'
         )
     else:
         model = GradientBoostingRegressor(
-            n_estimators=300,
-            learning_rate=0.9,
-            max_depth=3,
+            n_estimators=500,
+            learning_rate=0.05,
+            max_depth=4,
+            subsample=0.8,
+            min_samples_leaf=5,
             random_state=39
         )
     

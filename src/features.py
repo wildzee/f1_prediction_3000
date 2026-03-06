@@ -3,6 +3,34 @@ import numpy as np
 from sklearn.impute import SimpleImputer
 from src.constants import CLEAN_AIR_PACE, DRIVER_TO_TEAM, WET_PERFORMANCE
 
+# Circuit type classification (matching training_data_builder.py)
+CIRCUIT_TYPES = {
+    "Australia": 1, "Bahrain": 0, "Saudi Arabia": 2, "Japan": 0, "China": 0,
+    "Miami": 2, "Monaco": 2, "Canada": 1, "Spain": 0, "Austria": 0,
+    "Great Britain": 0, "Hungary": 0, "Belgium": 0, "Netherlands": 0,
+    "Italy": 0, "Azerbaijan": 2, "Singapore": 2, "United States": 0,
+    "Mexico": 0, "Brazil": 0, "Las Vegas": 2, "Qatar": 0, "Abu Dhabi": 0,
+    "Madrid": 0, "Imola": 0,
+}
+
+# DNF tendency per driver (historical 2022-2025 rate, 0-1)
+DNF_RATES = {
+    "VER": 0.06, "HAM": 0.05, "LEC": 0.10, "NOR": 0.07, "ALO": 0.08,
+    "PIA": 0.06, "RUS": 0.07, "SAI": 0.08, "STR": 0.10, "GAS": 0.09,
+    "OCO": 0.11, "BEA": 0.08, "HAD": 0.08, "ANT": 0.08, "COL": 0.10,
+    "ALB": 0.09, "LAW": 0.08, "LIN": 0.10, "HUL": 0.10, "BOR": 0.10,
+    "BOT": 0.08, "PER": 0.09,
+}
+
+# Races per driver (experience at each circuit, 0 for rookies)
+EXPERIENCE = {
+    "VER": 10, "HAM": 18, "LEC": 7, "NOR": 6, "ALO": 18,
+    "PIA": 3, "RUS": 4, "SAI": 6, "STR": 8, "GAS": 7,
+    "OCO": 7, "BEA": 1, "HAD": 0, "ANT": 0, "COL": 1,
+    "ALB": 4, "LAW": 1, "LIN": 0, "HUL": 12, "BOR": 0,
+    "BOT": 12, "PER": 12,
+}
+
 
 def calculate_team_performance_score():
     """
@@ -21,38 +49,35 @@ def calculate_team_performance_score():
 def estimate_qualifying_time(driver_code, circuit_baseline=None):
     """
     Estimate a qualifying time for a driver when real qualifying data isn't available.
-    Uses CleanAirRacePace as a proxy scaled to the circuit.
-    
-    For 2026 pre-season predictions without any qualifying data, we use
-    the driver's clean air race pace as a rough qualifying estimate.
-    Qualifying is typically ~2-3s faster than race pace.
     """
     base_pace = CLEAN_AIR_PACE.get(driver_code, 95.0)
     
     if circuit_baseline is not None:
-        # Scale: if the circuit baseline is e.g. 80s (Australia), 
-        # scale the relative differences from CleanAirPace
-        reference_pace = 93.5  # average of CleanAirPace values
-        delta = base_pace - reference_pace  # positive = slower than average
+        reference_pace = 93.5
+        delta = base_pace - reference_pace
         estimated_quali = circuit_baseline + delta
     else:
-        # Without circuit info, use pace directly (quali is ~2-3s faster)
         estimated_quali = base_pace - 2.5
     
     return estimated_quali
 
 
 def engineer_features(historical_data, preseason_data, grid_2026, weather_conditions,
-                      qualifying_data=None, circuit_baseline=None):
+                      qualifying_data=None, circuit_baseline=None, circuit_name=None):
     """
-    Build the feature matrix matching the original prediction scripts.
+    Build the feature matrix for race prediction.
     
-    Feature order (matching monotone_constraints):
+    Enhanced feature set (10 features):
     [0] QualifyingTime — fastest qualifying lap (real or estimated)
-    [1] RainProbability
-    [2] Temperature
-    [3] TeamPerformanceScore
-    [4] CleanAirRacePace (s)
+    [1] GridPosition — starting grid position
+    [2] RainProbability
+    [3] Temperature
+    [4] WindSpeed — max wind speed (km/h)
+    [5] TeamPerformanceScore
+    [6] CleanAirRacePace (s)
+    [7] CircuitType — 0=permanent, 1=semi-street, 2=street
+    [8] DriverExperience — races at this circuit type
+    [9] DNFRate — historical DNF probability
     """
     df = grid_2026.copy()
     
@@ -73,40 +98,58 @@ def engineer_features(historical_data, preseason_data, grid_2026, weather_condit
     team_performance = calculate_team_performance_score()
     df["TeamPerformanceScore"] = df["Team"].map(team_performance)
     
-    # Weather
+    # --- Weather ---
     rain_prob = weather_conditions.get("pop", 0.0)
     temperature = weather_conditions.get("temp", 20.0)
+    wind_speed = weather_conditions.get("wind_speed", 10.0)
     df["RainProbability"] = rain_prob
     df["Temperature"] = temperature
+    df["WindSpeed"] = wind_speed
+    
+    # --- Circuit Type ---
+    ct = 0  # default permanent
+    if circuit_name:
+        ct = CIRCUIT_TYPES.get(circuit_name, 0)
+    df["CircuitType"] = ct
+    
+    # --- Driver Experience & DNF Rate ---
+    df["DriverExperience"] = df["DriverCode"].map(EXPERIENCE).fillna(0)
+    df["DNFRate"] = df["DriverCode"].map(DNF_RATES).fillna(0.10)
     
     # --- QUALIFYING TIME (the #1 most important feature) ---
     if qualifying_data is not None and not qualifying_data.empty:
-        # Real qualifying data available
         df = df.merge(qualifying_data[["DriverCode", "QualifyingTime (s)"]],
                       on="DriverCode", how="left")
-        # Fill any missing drivers with estimates
         mask = df["QualifyingTime (s)"].isna()
         df.loc[mask, "QualifyingTime (s)"] = df.loc[mask, "DriverCode"].apply(
             lambda code: estimate_qualifying_time(code, circuit_baseline)
         )
     else:
-        # No qualifying data — estimate for all drivers
         df["QualifyingTime (s)"] = df["DriverCode"].apply(
             lambda code: estimate_qualifying_time(code, circuit_baseline)
         )
+    
+    # --- GRID POSITION ---
+    # If qualifying data exists, derive grid from qualifying order
+    df["GridPosition"] = df["QualifyingTime (s)"].rank(method="min").astype(int)
     
     # Wet adjustment on qualifying time
     df["WetFactor"] = df["DriverCode"].map(WET_PERFORMANCE)
     if rain_prob >= 0.75:
         df["QualifyingTime (s)"] = df["QualifyingTime (s)"] * df["WetFactor"]
     
-    # --- FEATURE MATRIX (matching original script order) ---
+    # --- FEATURE MATRIX (enhanced 10-feature set) ---
     feature_cols = [
         "QualifyingTime (s)",
+        "GridPosition",
         "RainProbability",
         "Temperature",
+        "WindSpeed",
         "TeamPerformanceScore",
-        "CleanAirRacePace (s)"
+        "CleanAirRacePace (s)",
+        "CircuitType",
+        "DriverExperience",
+        "DNFRate",
     ]
     
     imputer = SimpleImputer(strategy="median")

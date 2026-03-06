@@ -26,7 +26,7 @@ This app uses a Machine Learning model (**XGBoost**) to predict the full 22-driv
 
 ---
 
-## 🛠️ How to Start (For Beginners!)
+## 🛠️ How to Start 
 
 Even if you're a complete "noob" at coding, you can run this app easily on your computer by following these steps.
 

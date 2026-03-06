@@ -181,7 +181,8 @@ if run_btn:
         df_full, X_features = engineer_features(
             hist_data, preseason, grid_2026, weather,
             qualifying_data=quali_input,
-            circuit_baseline=circuit_baseline
+            circuit_baseline=circuit_baseline,
+            circuit_name=historical_race_target
         )
     
     with st.spinner("Training XGBoost model..."):
