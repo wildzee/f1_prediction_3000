@@ -162,24 +162,44 @@ if run_btn and has_practice:
             df["TestingPace (s)"] = np.nan
             testing_available = False
         
+        # ── Source 4: Team-Circuit Estimate (always available as sanity anchor) ──
+        # Derives where each driver *should* be based on their team's performance
+        # relative to the circuit's fastest historical time.
+        # This prevents anomalously fast practice laps from dominating.
+        if hist_available:
+            p1_circuit_time = df["HistQualiTime (s)"].min()  # fastest 2025 quali time at this circuit
+            # Typical qualifying spread: ~3s from best team (1.0) to worst (0.0)
+            df["TeamCircuitEst (s)"] = p1_circuit_time + (1 - df["TeamScore"]) * 3.0
+            team_est_available = True
+        elif not practice_df.empty:
+            # Fallback: derive from practice session fastest
+            p1_practice = practice_df["PracticeTime (s)"].min()
+            df["TeamCircuitEst (s)"] = (p1_practice - 1.5) + (1 - df["TeamScore"]) * 3.0
+            team_est_available = True
+        else:
+            df["TeamCircuitEst (s)"] = np.nan
+            team_est_available = False
+
         # ── Blended Estimation ──
-        # Dynamically adjust weights based on which sources are available
-        # Target blend: FP=55%, HistQuali=25%, Testing=20%
+        # Weights: FP=40%, HistQuali=30%, Testing=15%, TeamCircuitEst=15%
+        # If a source is missing, its weight is redistributed proportionally.
         def blend_row(row):
             fp_val   = row.get("FP_EstQuali (s)", np.nan)
             hist_val = row.get("HistQualiTime (s)", np.nan)
             test_val = row.get("TestingPace (s)", np.nan)
-            
+            team_val = row.get("TeamCircuitEst (s)", np.nan)
+
             sources, weights = [], []
-            if pd.notna(fp_val):   sources.append(fp_val);   weights.append(0.55)
-            if pd.notna(hist_val): sources.append(hist_val); weights.append(0.25)
-            if pd.notna(test_val): sources.append(test_val); weights.append(0.20)
-            
+            if pd.notna(fp_val):   sources.append(fp_val);   weights.append(0.40)
+            if pd.notna(hist_val): sources.append(hist_val); weights.append(0.30)
+            if pd.notna(test_val): sources.append(test_val); weights.append(0.15)
+            if pd.notna(team_val): sources.append(team_val); weights.append(0.15)
+
             if not sources:
                 return np.nan
             total_w = sum(weights)
             return sum(s * w for s, w in zip(sources, weights)) / total_w
-        
+
         df["EstimatedQuali (s)"] = df.apply(blend_row, axis=1)
         
         # ── Weather adjustment (wet race) ──
@@ -210,24 +230,30 @@ if run_btn and has_practice:
         src_col1, src_col2 = st.columns(2)
         
         with src_col1:
-            st.markdown("**🏎️ Practice Sessions (55% weight)**")
+            st.markdown("**🏎️ Practice Sessions (40% weight)**")
             if sessions_loaded:
                 st.success(f"✅ {sessions_label} — best lap per driver across all sessions")
             else:
                 st.error("❌ No practice data")
             
-            st.markdown("**📡 2025 Historical Qualifying (25% weight)**")
+            st.markdown("**📡 2025 Historical Qualifying (30% weight)**")
             if hist_available:
                 st.success(f"✅ 2025 {historical_race_target} GP qualifying (FastF1)")
             else:
                 st.warning(f"⚠️ Not available — weight redistributed to other sources")
         
         with src_col2:
-            st.markdown("**🧪 Pre-Season Testing (20% weight)**")
+            st.markdown("**🧪 Pre-Season Testing (15% weight)**")
             if testing_available:
                 st.success("✅ 2026 Barcelona + Bahrain fastest laps")
             else:
                 st.warning("⚠️ Not available — weight redistributed")
+            
+            st.markdown("**📐 Team-Circuit Estimate (15% weight)**")
+            if team_est_available:
+                st.success("✅ Derived from circuit baseline + team performance gap (prevents unrealistic outliers)")
+            else:
+                st.warning("⚠️ Not available")
             
             st.markdown("**🌤️ Weather**")
             rain_pct_d = weather.get('pop', 0) * 100
