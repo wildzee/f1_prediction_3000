@@ -183,6 +183,19 @@ def get_live_practice_data(year, race):
             
             if not laps.empty:
                 laps["PracticeTime (s)"] = laps["LapTime"].dt.total_seconds()
+                
+                # Filter out slow laps (out-laps, in-laps, installation laps)
+                # Only keep laps above a minimum plausible F1 time (60s)
+                # and within 107% of the session best (mirrors F1's qualifying rule)
+                session_best = laps["PracticeTime (s)"].min()
+                laps = laps[
+                    (laps["PracticeTime (s)"] >= 60) &
+                    (laps["PracticeTime (s)"] <= session_best * 1.07)
+                ]
+                
+                if laps.empty:
+                    continue
+                
                 fastest = laps.groupby("Driver")["PracticeTime (s)"].min().reset_index()
                 fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
                 
@@ -205,9 +218,15 @@ def get_live_qualifying_data(year, race):
         laps.dropna(inplace=True)
         if not laps.empty:
             laps["QualifyingTime (s)"] = laps["LapTime"].dt.total_seconds()
-            fastest = laps.groupby("Driver")["QualifyingTime (s)"].min().reset_index()
-            fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
-            return fastest
+            session_best = laps["QualifyingTime (s)"].min()
+            laps = laps[
+                (laps["QualifyingTime (s)"] >= 60) &
+                (laps["QualifyingTime (s)"] <= session_best * 1.07)
+            ]
+            if not laps.empty:
+                fastest = laps.groupby("Driver")["QualifyingTime (s)"].min().reset_index()
+                fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
+                return fastest
     except Exception:
         pass
     return pd.DataFrame()
