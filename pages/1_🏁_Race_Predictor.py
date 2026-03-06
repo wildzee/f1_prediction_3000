@@ -161,10 +161,54 @@ if run_btn:
         gen_time = time.time() - start_time
     
     # --- RESULTS ---
-    st.success(f"Predictions generated in {gen_time:.2f} seconds! (Source: {data_source_label})")
+    st.success(f"Predictions generated in {gen_time:.2f} seconds!")
     
     if model is not None:
         st.caption(f"XGBoost MAE: **{mae:.3f} seconds**")
+    
+    # --- DATA SOURCES PANEL ---
+    with st.expander("📋 Data Sources Used in This Prediction", expanded=True):
+        src_col1, src_col2 = st.columns(2)
+        
+        with src_col1:
+            st.markdown("**🏎️ Lap Time Input (Grid Order)**")
+            if data_source == "qualifying":
+                st.success("✅ Real Qualifying (FastF1 live)")
+            elif data_source == "qualifying_saved":
+                st.info("📁 Predicted Qualifying (saved from Qualifying Predictor)")
+            elif data_source == "practice":
+                st.warning(f"⚠️ {p_session} Practice laps (qualifying not yet available)")
+            elif data_source == "testing":
+                st.info("📋 Pre-Season Testing baselines")
+            
+            st.markdown("**📡 Historical Race Data**")
+            if not hist_data.empty:
+                st.success(f"✅ 2025 {historical_race_target} GP race laps (FastF1)")
+            else:
+                st.warning("⚠️ No historical data — using team pace estimates only")
+        
+        with src_col2:
+            st.markdown("**🌤️ Weather**")
+            rain_pct = weather.get('pop', 0) * 100
+            temp = weather.get('temp', 22)
+            desc = weather.get('description', 'N/A').title()
+            if weather.get('description', '') == 'Unknown - using historical average' or rain_pct == 0 and temp == 22:
+                st.info(f"📋 Default (no forecast available) — assuming dry, 22°C")
+            else:
+                condition_icon = "🌧️" if rain_pct >= 50 else "⛅" if rain_pct >= 20 else "☀️"
+                st.success(f"{condition_icon} Live forecast: {desc}, {temp}°C, {rain_pct:.0f}% rain")
+            
+            st.markdown("**🤖 Prediction Model**")
+            if model is not None:
+                st.success(f"✅ XGBoost trained on 2025 {historical_race_target} laps (MAE: {mae:.3f}s)")
+            else:
+                st.warning("⚠️ Fallback: team pace formula (not enough training data)")
+            
+            st.markdown("**🧪 Pre-Season Testing**")
+            if not preseason.empty:
+                st.success(f"✅ 2026 Barcelona + Bahrain testing fastest laps")
+            else:
+                st.warning("⚠️ No testing data loaded")
     
     st.divider()
     

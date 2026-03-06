@@ -139,6 +139,36 @@ if run_btn and has_practice:
         gen_time = time.time() - start_time
     
     st.success(f"Qualifying predicted in {gen_time:.2f} seconds! (Blended {session_used} + Historical Data)")
+    
+    # --- DATA SOURCES PANEL ---
+    with st.expander("📋 Data Sources Used in This Prediction", expanded=True):
+        src_col1, src_col2 = st.columns(2)
+        
+        with src_col1:
+            st.markdown("**🏎️ Live Practice Data**")
+            st.success(f"✅ {session_used} — {historical_race_target} GP 2026 (FastF1, filtered to flying laps)")
+            
+            st.markdown("**📡 Historical Qualifying Data**")
+            if hist_available:
+                st.success(f"✅ 2025 {historical_race_target} GP qualifying (FastF1) — blended at 20%")
+            else:
+                st.warning(f"⚠️ No 2025 {historical_race_target} qualifying data found — using practice only")
+        
+        with src_col2:
+            st.markdown("**🌤️ Weather**")
+            rain_pct = weather.get('pop', 0) * 100
+            temp = weather.get('temp', 22)
+            desc = weather.get('description', 'N/A').title()
+            if weather.get('description', '') == 'Unknown - using historical average':
+                st.info("📋 Default (no forecast available) — dry conditions assumed")
+            else:
+                condition_icon = "🌧️" if rain_pct >= 50 else "⛅" if rain_pct >= 20 else "☀️"
+                wet_note = " — **wet performance factors applied**" if rain_pct >= 75 else ""
+                st.success(f"{condition_icon} Live forecast: {desc}, {temp}°C, {rain_pct:.0f}% rain{wet_note}")
+            
+            st.markdown("**⚙️ Estimation Method**")
+            st.info("Practice time − 1.5s − (team performance bonus) → blended with historical qualifying at 80/20")
+    
     st.divider()
     
     # Save button
