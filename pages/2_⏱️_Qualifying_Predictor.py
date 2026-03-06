@@ -88,7 +88,7 @@ if run_btn and has_practice:
         # Load historical qualifying data (2025)
         hist_quali = get_historical_qualifying_data(2025, historical_race_target)
         if not hist_quali.empty:
-            hist_quali = hist_quali.rename(columns={"QualifyingTime (s)": "HistQualiTime (s)"})
+            hist_quali = hist_quali.rename(columns={"Driver": "DriverCode", "QualifyingTime (s)": "HistQualiTime (s)"})
             df = df.merge(hist_quali[["DriverCode", "HistQualiTime (s)"]], on="DriverCode", how="left")
             circuit_median = hist_quali["HistQualiTime (s)"].median()
             hist_available = True

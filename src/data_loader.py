@@ -175,8 +175,6 @@ def get_live_practice_data(year, race):
     sessions = ["FP3", "FP2", "FP1"]
     for s_type in sessions:
         try:
-            # FastF1 allows suppressing output for cleaner logs
-            fastf1.config.setup_logging(level='ERROR')
             
             session = fastf1.get_session(year, race, s_type)
             session.load()
@@ -188,15 +186,11 @@ def get_live_practice_data(year, race):
                 fastest = laps.groupby("Driver")["PracticeTime (s)"].min().reset_index()
                 fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
                 
-                # Restore original logging
-                fastf1.config.setup_logging(level='INFO')
                 return fastest, s_type
         except Exception:
             # Session likely hasn't happened yet in 2026 or no data available
             continue
             
-    # Restore original logging
-    fastf1.config.setup_logging(level='INFO')
     return pd.DataFrame(), None
 
 def get_live_qualifying_data(year, race):
@@ -205,7 +199,6 @@ def get_live_qualifying_data(year, race):
     Returns the fastest lap per driver from the Q session.
     """
     try:
-        fastf1.config.setup_logging(level='ERROR')
         session = fastf1.get_session(year, race, "Q")
         session.load()
         laps = session.laps[["Driver", "LapTime"]].copy()
@@ -214,9 +207,7 @@ def get_live_qualifying_data(year, race):
             laps["QualifyingTime (s)"] = laps["LapTime"].dt.total_seconds()
             fastest = laps.groupby("Driver")["QualifyingTime (s)"].min().reset_index()
             fastest.rename(columns={"Driver": "DriverCode"}, inplace=True)
-            fastf1.config.setup_logging(level='INFO')
             return fastest
     except Exception:
         pass
-    fastf1.config.setup_logging(level='INFO')
     return pd.DataFrame()
