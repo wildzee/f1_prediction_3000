@@ -7,3 +7,6 @@ plotly
 python-dotenv
 requests
 xgboost
+openmeteo-requests
+requests-cache
+retry-requests
