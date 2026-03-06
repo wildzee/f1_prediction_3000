@@ -68,47 +68,74 @@ st.divider()
 # --- DATA AVAILABILITY CHECK ---
 # Priority: 1. Live Qualifying  2. Live Practice  3. Testing  4. Nothing → block
 with st.spinner("Checking FastF1 for live session data..."):
-    # 1. Try real qualifying from FastF1
     live_q = get_live_qualifying_data(2026, historical_race_target)
-    
-    # 2. Try predicted qualifying saved from the Qualifying Predictor page
     saved_q = load_session_results(race_info['round'], "Q")
-    
-    # 3. Try live practice from FastF1
     live_p, p_session = get_live_practice_data(2026, historical_race_target)
-    
-    # 4. Testing data
     preseason = get_2026_preseason_data()
 
-# Determine exactly which source to use based on strict hierarchy
+# Determine which source to use (strict hierarchy)
 quali_input = None
-
 if not live_q.empty:
     data_source = "qualifying"
-    data_source_label = "✅ Real Qualifying Data (FastF1)"
-    st.success("**Data Source: Real Qualifying** — Best possible prediction accuracy.")
     quali_input = live_q.copy()
 elif not saved_q.empty:
     data_source = "qualifying_saved"
-    data_source_label = "✅ Predicted Qualifying Data (Saved)"
-    st.success("**Data Source: Predicted Qualifying** — using the qualifying order you predicted and saved on the other page.")
     quali_input = saved_q.rename(columns={"QTime (s)": "QualifyingTime (s)"})
 elif not live_p.empty:
     data_source = "practice"
-    data_source_label = f"⚠️ Practice Data ({p_session})"
-    st.warning(f"**Data Source: {p_session}** — Qualifying data not available. Using {p_session} lap times as qualifying estimates.")
     quali_input = live_p.rename(columns={"PracticeTime (s)": "QualifyingTime (s)"})
-    # Practice is typically 1 second slower than qualifying on average
     quali_input["QualifyingTime (s)"] = quali_input["QualifyingTime (s)"] - 1.0
 elif not preseason.empty:
     data_source = "testing"
-    data_source_label = "📋 Pre-Season Testing Data"
-    st.info("**Data Source: Pre-Season Testing** — No live data available yet for this weekend. Using pre-season baselines.")
 else:
     data_source = None
-    st.error("❌ **Cannot predict** — No data available at all.")
 
-st.caption(f"Data priority enforced: Real Qualifying → Predicted Qualifying → Practice → Testing")
+# --- DATA STATUS CARD (always visible before prediction) ---
+st.subheader("📡 Data Inputs")
+dc1, dc2, dc3, dc4 = st.columns(4)
+
+with dc1:
+    st.markdown("**🏎️ Lap Time Source**")
+    if data_source == "qualifying":
+        st.success(f"✅ Real Qualifying ({len(live_q)} drivers)")
+    elif data_source == "qualifying_saved":
+        st.info(f"📁 Saved Predicted Qualifying ({len(saved_q)} drivers)")
+    elif data_source == "practice":
+        st.warning(f"⚠️ {p_session} Practice ({len(live_p)} drivers)")
+        st.caption("−1.0s adjustment applied")
+    elif data_source == "testing":
+        st.info("📋 Pre-Season Testing")
+    else:
+        st.error("❌ No data available")
+
+with dc2:
+    st.markdown("**📡 Historical Race Data**")
+    st.info(f"🔄 2025 {historical_race_target} GP")
+    st.caption("Loaded when prediction runs")
+
+with dc3:
+    st.markdown("**🌤️ Weather**")
+    rain_pct = weather.get('pop', 0) * 100
+    temp = weather.get('temp', 22)
+    desc = weather.get('description', 'Unknown - using historical average')
+    if desc == 'Unknown - using historical average':
+        st.info("📋 No forecast (>5 days out)")
+        st.caption("22°C, dry assumed")
+    else:
+        icon = "🌧️" if rain_pct >= 50 else "⛅" if rain_pct >= 20 else "☀️"
+        st.success(f"{icon} {temp}°C, {rain_pct:.0f}% rain")
+
+with dc4:
+    st.markdown("**🧪 Pre-Season Testing**")
+    if not preseason.empty:
+        st.success(f"✅ {len(preseason)} drivers (BCN + BHR)")
+    else:
+        st.warning("⚠️ No testing data")
+
+st.divider()
+
+if data_source is None:
+    st.error("❌ **Cannot predict** — No data available at all.")
 
 # --- PREDICTION ENGINE ---
 if data_source is not None:

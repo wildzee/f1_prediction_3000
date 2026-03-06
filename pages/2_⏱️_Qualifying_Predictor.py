@@ -59,21 +59,55 @@ with col2:
 st.divider()
 
 # --- DATA AVAILABILITY CHECK ---
-with st.spinner("Checking FastF1 for live 2026 practice data..."):
-    # Automatically get live FP data
+with st.spinner("Checking FastF1 for live 2026 session data..."):
     practice_df, session_used = get_live_practice_data(2026, historical_race_target)
+    hist_quali_check = get_historical_qualifying_data(2025, historical_race_target)
 
 has_practice = not practice_df.empty
 
+# --- DATA STATUS CARD (always visible before prediction) ---
+st.subheader("📡 Data Inputs")
+dc1, dc2, dc3 = st.columns(3)
+
+with dc1:
+    st.markdown("**🏎️ Live Practice Session**")
+    if has_practice:
+        laps_count = len(practice_df)
+        st.success(f"✅ **{session_used}** ({laps_count} drivers loaded)")
+    else:
+        st.error("❌ No practice data yet")
+        st.caption("Available after FP1/FP2/FP3")
+
+with dc2:
+    st.markdown("**📡 2025 Historical Qualifying**")
+    if not hist_quali_check.empty:
+        st.success(f"✅ {historical_race_target} 2025 Q data ({len(hist_quali_check)} drivers)")
+    else:
+        st.warning(f"⚠️ No 2025 {historical_race_target} data")
+        st.caption("Practice-only estimation will be used")
+
+with dc3:
+    st.markdown("**🌤️ Weather for Race Day**")
+    rain_pct = weather.get('pop', 0) * 100
+    temp = weather.get('temp', 22)
+    desc = weather.get('description', 'Unknown - using historical average')
+    if desc == 'Unknown - using historical average':
+        st.info("📋 No forecast (>5 days out)")
+        st.caption("Dry conditions assumed")
+    else:
+        icon = "🌧️" if rain_pct >= 50 else "⛅" if rain_pct >= 20 else "☀️"
+        st.success(f"{icon} {desc.title()}, {temp}°C, {rain_pct:.0f}% rain")
+        if rain_pct >= 75:
+            st.caption("⚠️ Wet performance factors will be applied")
+
+st.divider()
+
 if has_practice:
-    st.success(f"✅ Live practice data fetched automatically: **{session_used}** — Ready to predict qualifying!")
     run_btn = st.button("🚀 Predict Qualifying Order", use_container_width=True)
 else:
     st.error(f"❌ **Cannot predict qualifying** — No practice session data available yet for the 2026 {historical_race_target} Grand Prix.")
     st.info("FastF1 will automatically fetch the data when FP1/FP2/FP3 sessions happen.")
     run_btn = False
-
-st.caption("Qualifying prediction strictly requires at least one practice session (FP1, FP2, or FP3).")
 
 # --- QUALIFYING PREDICTION ---
 if run_btn and has_practice:
